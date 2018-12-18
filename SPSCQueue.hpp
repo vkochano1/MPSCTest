@@ -70,6 +70,7 @@ namespace Utils::Concurrent
 
       newEl = std::move(buffer_[readPos]);
       readIdx_.store( (readPos + 1 ) % RingBufSize, std::memory_order_release);
+      return true;
     }
 
   private:

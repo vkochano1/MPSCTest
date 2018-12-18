@@ -72,14 +72,22 @@ private:
           [this, &writerContext, coreToPin, &stopper, publishDelayMS] ()
           {
             Utils::pinThreadToCore(coreToPin);
+            uint64_t sum = 0;
+            uint64_t count = 0;
             for (size_t x = 0; stopper.load() != true ;++x)
             {
-                this->queue_.pushWithContext(x,writerContext);
+                auto begin = Utils::rdtscp();
+                this->queue_.pushWithContext(begin,writerContext);
+                auto end = Utils::rdtscp();
+                sum += end - begin;
+                ++count;
                 if(publishDelayMS > 0)
                 {
                   std::this_thread::sleep_for(std::chrono::milliseconds(publishDelayMS));
                 }
             }
+            if (count)
+              std::cout << "avgPushLatency:" << sum / count << std::endl;
           }
         )
       );
@@ -90,19 +98,31 @@ private:
   {
     size_t numProcessed = 0;
     uint64_t sum = 0;
-    uint64_t unused;
+    uint64_t received;
+    uint64_t receivedSum = 0;
+    uint64_t receivedProcessed = 0;
+
     for (;numProcessed < maxElementsToProcess;)
     {
       auto begin = Utils::rdtscp();
-      if(!queue_.try_pop(unused))
+      if(!queue_.try_pop(received))
       {
         continue;
       }
       auto end = Utils::rdtscp();
       ++numProcessed;
       sum += end - begin;
+      if(end > received)
+      {
+        // need to use the same cpu socket
+        ++receivedProcessed;
+        receivedSum += end - received;
+      }
+
     }
     std::cout << "AvgPopLatency: " << sum / maxElementsToProcess << std::endl;
+    std::cout << "AvgQueueLatency: " << receivedSum / receivedProcessed << std::endl;
+
   }
 
   void stopAllWriters()
@@ -126,14 +146,14 @@ protected:
 
 int main()
 {
-  std::this_thread::sleep_for(std::chrono::seconds(1));
+  //std::this_thread::sleep_for(std::chrono::seconds(1));
   {
-    MPSC_QueueTest<VyukhovQueueAdapter<uint64_t, 1000> > test(10000,3,-1, 1000);
+    MPSC_QueueTest<VyukhovQueueAdapter<uint64_t, 1000> > test(10000,1,1, 1000);
   }
 
- std::this_thread::sleep_for(std::chrono::seconds(1));
+ //std::this_thread::sleep_for(std::chrono::seconds(1));
   {
-    MPSC_QueueTest<CombinedQueueAdapter<uint64_t, 1000> > test(10000,3,-1, 1000);
+    MPSC_QueueTest<CombinedQueueAdapter<uint64_t, 1000> > test(10000,1,1, 1000);
   }
   return  0;
 }
